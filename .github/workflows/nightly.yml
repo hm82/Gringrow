@@ -1,0 +1,135 @@
+name: Nightly Build and Test
+
+on:
+  schedule:
+    # Run at 2:00 AM UTC every day
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+        
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linting
+      run: npm run lint || true
+    
+    - name: Run type checking
+      run: npm run typecheck || true
+    
+    - name: Run unit tests with coverage
+      run: npm run test:unit -- --coverage
+    
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report-${{ matrix.node-version }}
+        path: coverage/
+        retention-days: 7
+  
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run npm audit
+      run: npm audit --production
+      continue-on-error: true
+  
+  browser-compatibility:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps
+    
+    - name: Run cross-browser tests
+      run: npx playwright test --project=chromium --project=firefox --project=webkit
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: playwright-report-browsers
+        path: playwright-report/
+        retention-days: 7
+
+  performance:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build for production
+      run: npm run build
+    
+    - name: Run Lighthouse CI
+      uses: treosh/lighthouse-ci-action@v9
+      with:
+        configPath: ./.github/lighthouse-config.json
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+      env:
+        NODE_ENV: production
+        
+  notify:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan, browser-compatibility, performance]
+    if: always()
+    
+    steps:
+    - name: Notify on failure
+      if: ${{ contains(needs.*.result, 'failure') }}
+      run: echo "Some tests failed, notification would be sent here"
+      
+    - name: Notify on success
+      if: ${{ !contains(needs.*.result, 'failure') }}
+      run: echo "All tests passed, notification would be sent here"

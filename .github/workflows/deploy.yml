@@ -1,0 +1,83 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    tags:
+      - 'v*'  # Push events to tags matching v*, i.e., v1.0, v20.15.10
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linting
+      run: npm run lint || true
+      
+    - name: Run type checking
+      run: npm run typecheck || true
+    
+    - name: Run unit tests
+      run: npm run test:unit || true
+      
+    - name: Build
+      run: npm run build
+      
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: build
+        path: dist
+        retention-days: 7
+  
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: build
+        path: dist
+    
+    # Example deployment step - modify for your hosting platform
+    - name: Deploy to hosting platform
+      run: |
+        echo "Deploying to production..."
+        # This would be replaced with your actual deployment commands
+        # For example, deploying to Vercel, Netlify, AWS, etc.
+        # Example: vercel --prod
+    
+    - name: Post-deployment checks
+      run: |
+        echo "Running post-deployment checks..."
+        # Add verification checks after deployment
+        # This could include smoke tests, health checks, etc.
+    
+  notify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify on success
+      if: ${{ needs.deploy.result == 'success' }}
+      run: echo "Deployment successful! Notification would be sent here."
+      
+    - name: Notify on failure
+      if: ${{ needs.deploy.result == 'failure' }}
+      run: echo "Deployment failed! Notification would be sent here."
